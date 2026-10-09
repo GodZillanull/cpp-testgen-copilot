@@ -7,4 +7,4 @@ argument-hint: テストファイル（例 tests/RateLimiterTest.cpp）
 レビュー対象: ${input:tests:tests/FooTest.cpp}
 
 このテストファイルのうち、`test-reports/gate/gate-report.md` とベースライン以降に追加されたテストを、あなたの指示に従って独立にレビューしてください。
-テストを書いた側のコメントや報告は根拠にしないでください。
+テストを書いた側のコメントや報告は根拠にしないでください。対象の `questions.md` があれば、それも確認してください。

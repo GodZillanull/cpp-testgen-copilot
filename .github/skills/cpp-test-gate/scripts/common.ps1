@@ -340,8 +340,10 @@ function Get-TgFailedTests {
     param([string]$Output)
     $h = @{}
     foreach ($line in ($Output -split "`r?`n")) {
-        $m = [regex]::Match($line, '^\[\s+FAILED\s+\]\s+(\S+?)(,| \(\d+ ms\))')
-        if ($m.Success -and $m.Groups[2].Value -like ' (*') {
+        # per-iteration result line: "[  FAILED  ] Suite.Test (12 ms)" or
+        # "[  FAILED  ] Inst/Suite.Test/2, where GetParam() = 4 (0 ms)" (the end-of-run summary has no "(N ms)")
+        $m = [regex]::Match($line, '^\[\s+FAILED\s+\]\s+([^\s,]+)(?:,.*)?\s\(\d+ ms\)\s*$')
+        if ($m.Success) {
             $n = $m.Groups[1].Value
             if ($n -notmatch '\.') { continue }
             if ($h.ContainsKey($n)) { $h[$n]++ } else { $h[$n] = 1 }

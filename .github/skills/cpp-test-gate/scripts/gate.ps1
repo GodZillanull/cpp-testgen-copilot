@@ -5,7 +5,8 @@
 #   2. No test that existed in the baseline was removed or renamed.
 #   3. Production code is unchanged since the baseline (unless a human created .github/testgen/seam-approved).
 #   4. All tests pass N times in a row with --gtest_shuffle (flaky / failing tests are rejected).
-#   5. Every new (enabled) test adds line/branch coverage over the baseline on its own,
+#   5. Every new (enabled) test adds line/branch coverage over the baseline on its own
+#      (all cases of one TEST_P / TYPED_TEST are judged together),
 #      OR catches a mutant that no baseline test catches (mutants/results.json, produced with the current tests).
 #      In mutation-only mode (no coverage tool) only the second criterion applies.
 #   6. Every new DISABLED_ test is referenced in <reports>/bug_suspects.md.
@@ -161,19 +162,37 @@ $killerLookup = @{}
 foreach ($k in $uk.Kills.Keys) { $killerLookup[$k] = (@($uk.Kills[$k]) -join ',') }
 if ($uk.Stale -gt 0) { [void]$notes.Add("$($uk.Stale) killed mutant result(s) were produced with older test code and were ignored. Run mutate.ps1 -OnlySurvivors after the last test change to refresh them.") }
 
-Write-Host "[6/6] Checking the contribution of $($newTests.Count) new test(s)..."
+# Parameterized / typed tests (TEST_P, TYPED_TEST) are judged as one unit: all their cases together.
+function Get-TestUnitKey([string]$n) {
+    $k = $n -replace '/\d+$', ''          # Prefix/Suite.Test/3  -> Prefix/Suite.Test
+    $k = $k -replace '/\d+\.', '.'        # Suite/0.Test (typed) -> Suite.Test
+    return $k
+}
+$units = [ordered]@{}
+foreach ($t in $newTests) {
+    $key = Get-TestUnitKey $t.Name
+    if (-not $units.Contains($key)) { $units[$key] = @() }
+    $units[$key] = @($units[$key]) + @($t)
+}
+
+Write-Host "[6/6] Checking the contribution of $($units.Count) new test unit(s) ($($newTests.Count) test case(s))..."
 $rows = @()
 $idx = 0
-foreach ($t in $newTests) {
-    $row = [ordered]@{ name = $t.Name; newLines = 0; newBranches = 0; killer = ''; status = '' }
-    if ($killerLookup.ContainsKey($t.Name)) { $row.killer = $killerLookup[$t.Name] }
-    if (Test-Disabled $t.Name) {
-        $plain = ($t.Name -replace 'DISABLED_', '')
+foreach ($key in $units.Keys) {
+    $cases = @($units[$key])
+    $label = $key; if ($cases.Count -gt 1) { $label = "$key ($($cases.Count) cases)" }
+    $row = [ordered]@{ name = $label; newLines = 0; newBranches = 0; killer = ''; status = '' }
+    $kills = @()
+    foreach ($c in $cases) { if ($killerLookup.ContainsKey($c.Name)) { $kills += ($killerLookup[$c.Name] -split ',') } }
+    $row.killer = (@($kills | Select-Object -Unique) -join ',')
+    if (Test-Disabled $cases[0].Name) {
+        $t = $cases[0]
+        $plain = ($key -replace 'DISABLED_', '')
         $suiteTest = $plain.Split('/')[0]
-        if ($bugText -and ($bugText.Contains($plain) -or $bugText.Contains($t.Name) -or $bugText.Contains($suiteTest))) { $row.status = 'DISABLED (bug suspect recorded)' }
+        if ($bugText -and ($bugText.Contains($plain) -or $bugText.Contains($key) -or $bugText.Contains($t.Name) -or $bugText.Contains($suiteTest))) { $row.status = 'DISABLED (bug suspect recorded)' }
         else {
             $row.status = 'REJECT: DISABLED without bug_suspects.md entry'
-            [void]$reasons.Add("$($t.Name) is DISABLED but not referenced in bug_suspects.md.")
+            [void]$reasons.Add("$key is DISABLED but not referenced in bug_suspects.md.")
         }
         $rows += [pscustomobject]$row; continue
     }
@@ -182,17 +201,18 @@ foreach ($t in $newTests) {
         if ($row.killer) { $row.status = 'ACCEPT (catches a mutant no existing test catches)' }
         elseif ($requireGain) {
             $row.status = 'REJECT: catches no new mutant'
-            [void]$reasons.Add("$($t.Name) catches no mutant that the existing tests miss (mutation-only mode). Write mutants for the behaviour it checks and run mutate.ps1 -OnlySurvivors; if it still kills nothing new, delete it.")
+            [void]$reasons.Add("$key catches no mutant that the existing tests miss (mutation-only mode). Write mutants for the behaviour it checks and run mutate.ps1 -OnlySurvivors; if it still kills nothing new, delete it.")
         } else { $row.status = 'ACCEPT (gain not required)' }
         $rows += [pscustomobject]$row; continue
     }
     $idx++
     if ($idx -gt $maxPerTest) {
         $row.status = 'NOT MEASURED (limit gate.maxPerTestCoverageRuns)'
-        [void]$notes.Add("Per-test coverage limit reached; $($t.Name) was not measured individually. Submit smaller batches.")
+        [void]$notes.Add("Per-test coverage limit reached; $key was not measured individually. Submit smaller batches.")
         $rows += [pscustomobject]$row; continue
     }
-    $tm = Get-TgCoverage -Cfg $cfg -WorkDir (Join-Path $work ("t" + $idx)) -OnlyExe $t.Exe -Filter $t.Name
+    $filter = (@($cases | ForEach-Object { $_.Name }) -join ':')
+    $tm = Get-TgCoverage -Cfg $cfg -WorkDir (Join-Path $work ("t" + $idx)) -OnlyExe $cases[0].Exe -Filter $filter
     $tf = ConvertTo-TgObject (ConvertTo-TgCoverageJson $tm)
     $ts = Get-TgCoveredSet $tf
     foreach ($k in $ts) { if (-not $baseSet.Contains($k)) { $row.newLines++ } }
@@ -205,7 +225,7 @@ foreach ($t in $newTests) {
     elseif ($row.killer) { $row.status = 'ACCEPT (catches a mutant no existing test catches)' }
     elseif ($requireGain) {
         $row.status = 'REJECT: no coverage gain, catches no new mutant'
-        [void]$reasons.Add("$($t.Name) adds no coverage over the baseline and catches no mutant that existing tests miss. Delete it, or strengthen it to target a surviving mutant (mutate.ps1 -OnlySurvivors).")
+        [void]$reasons.Add("$key adds no coverage over the baseline and catches no mutant that existing tests miss. Delete it, or strengthen it to target a surviving mutant (mutate.ps1 -OnlySurvivors).")
     } else { $row.status = 'ACCEPT (gain not required)' }
     $rows += [pscustomobject]$row
 }

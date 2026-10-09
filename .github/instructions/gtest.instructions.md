@@ -1,16 +1,16 @@
 ---
-description: Google Test / gMock で C++ の単体テストを書くときの規約（振る舞い単位・状態検証・DAMP・決定性）
+description: Google Test / gMock で C++ の単体テストを書くときの規約（特性テストは観測で固定、性質テスト、振る舞い単位、DAMP、決定性）
 applyTo: "tests/**/*.{cpp,cc,cxx,h,hpp}"
 ---
 
 # Google Test 記述規約
 
-根拠: Software Engineering at Google（Unit Testing 章）、Google Testing Blog（DAMP）、GoogleTest 公式ドキュメント。
+根拠: Software Engineering at Google（Unit Testing 章）、Google Testing Blog（DAMP）、GoogleTest 公式ドキュメント、Feathers『Working Effectively with Legacy Code』（特性テスト）、メタモルフィックテスト（オラクルが無い場合の検証）。
 
 ## 構成と命名
 
 - 1 テスト = 1 振る舞い。メソッド単位ではなく「何をすると何が起きるか」単位で書く。
-- スイート名: 仕様テストは `<Class>Test`、特性テストは `<Class>CharacterizationTest`。
+- スイート名: 特性テストは `<Class>CharacterizationTest`（既定）、性質テストは `<Class>PropertyTest`、仕様テストは `<Class>Test`。
 - テスト名: 振る舞いを表す CamelCase。例: `ReturnsEmptyWhenInputIsBlank`, `ThrowsOnNegativeSize`。
   GoogleTest の制約によりスイート名・テスト名にアンダースコアを使わない（`DISABLED_` 接頭辞のみ例外）。
 - 本体は Arrange / Act / Assert の 3 ブロック（Given-When-Then）。空行で区切る。
@@ -24,7 +24,36 @@ applyTo: "tests/**/*.{cpp,cc,cxx,h,hpp}"
 - 浮動小数点は `EXPECT_DOUBLE_EQ` / `EXPECT_NEAR`。文字列は `EXPECT_EQ(std::string, ...)` か `EXPECT_STREQ`。
 - 例外は `EXPECT_THROW(stmt, Type)` / `EXPECT_NO_THROW`。メッセージまで仕様なら `EXPECT_THAT` + `testing::HasSubstr`。
 - コンテナは `EXPECT_THAT(v, testing::ElementsAre(...))` などのマッチャーを使い、失敗時に差分が読めるようにする。
-- 「例外が出ないこと」「クラッシュしないこと」だけを確認するテストは原則書かない（バグを検出できないため）。
+- 「例外が出ないこと」「クラッシュしないこと」だけを確認するテストは原則書かない（バグを検出できないため）。例外は性質テストの「異常入力で落ちない」で、入力の種類を明示する場合のみ。
+
+## 特性テストの書き方（観測して固定する）
+
+仕様の無いコードでは、期待値を**コードを読んで推測しない**（読み間違えると、存在しない動作を固定してしまう）。Feathers の手順に従う:
+
+1. 入力を決めて、明らかに違う期待値（例: `"__observe__"`、`-12345`）でテストを書く。
+2. `run_tests.ps1 -Filter "<Suite>.<Test>"` で実行し、失敗メッセージの `Which is:`（実際の値）を読む。
+3. その値を期待値に書き写す。テスト名は観測した動作を表す（`ReturnsAForScore101`）。
+4. 観測した動作が不自然なら（境界が非対称、エラーなのに成功値、他の関数と矛盾など）、期待値はそのままにして `// 要確認: Q-xxx` を付け、`questions.md` に質問を追加する。
+
+入力の選び方: 各分岐の境界の両側、0・空・最大値・負数、不正な入力、呼び出し元で実際に渡されている典型値。
+1 つの関数に対して特性テストを 1 件だけ書いて終わりにしない（境界の片側だけでは動作の変化を検出できない）。
+
+## 性質テスト（正解が分からなくても書けるテスト）
+
+正解の値は分からなくても、成り立つべき**関係**なら言えることが多い。根拠をコメントに書く。
+
+| 性質 | 例 |
+|---|---|
+| 往復一致 | `Decode(Encode(x)) == x`、`Parse(Format(v)) == v` |
+| 冪等性 | `Normalize(Normalize(s)) == Normalize(s)` |
+| 対称性・順序非依存 | `Distance(a, b) == Distance(b, a)`、要素の順番を変えても合計は同じ |
+| 単調性 | 入力を増やすと出力が減らない（料金、上限処理など） |
+| 関数同士の整合 | `Add` した数と `Count()` が一致、`Contains(x)` と `Find(x) != end` が一致 |
+| 不変条件 | 操作後も `Min() <= Max()`、サイズが負にならない |
+| 異常入力で落ちない | 空・巨大・不正形式の入力でクラッシュせず、エラーを返す |
+
+- 入力は複数用意し `TEST_P` で回す。乱数は使わず、固定の値の表にする。
+- 性質が本当に成り立つか自信が無い場合は、性質テストにせず `questions.md` で確認する。
 
 ## 境界値・同値分割
 

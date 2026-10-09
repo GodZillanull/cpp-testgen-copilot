@@ -18,7 +18,7 @@ Windows/MSVC では Mull が使えないため、**ミュータント（擬似�
 2. 実行: `powershell -NoProfile -ExecutionPolicy Bypass -File .github/skills/cpp-mutation/scripts/mutate.ps1`
 3. `test-reports/mutants/survivors.md` を読む。
 4. 生き残り（SURVIVED）ごとに、どちらかを行う:
-   - **殺すテストを書く**: 元のコードで成功し、ミュータントで失敗するテスト。期待値は仕様から決める（ミュータントとの差分から逆算しない）。
+   - **殺すテストを書く**: 元のコードで成功し、ミュータントで失敗するテスト。仕様があればそれに、無ければ**元のコードで実行して観測した値**に基づく（特性テスト）。ミュータントとの差分から逆算しない。
    - **等価ミュータントとして除外**: どの入力でも挙動が変わらない場合のみ。`mutants.json` の該当要素に `"equivalent": true, "equivalentReason": "理由"` を追加。「テストが書きにくい」は等価の理由にならない。
 5. 追加したテストで殺せたか確認: `mutate.ps1 -OnlySurvivors`（生き残り・未実行・テスト変更前の検出結果だけを再実行する）
 6. 最後に cpp-test-gate の `gate.ps1` を実行する。新しくミュータントを検出したテストは、カバレッジが増えなくても合格になる。
