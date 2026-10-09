@@ -1,0 +1,10 @@
+# スクリプトの作業ファイル・機械生成物（各自の環境で再生成される）
+coverage/
+gate/
+baseline/
+mutants/.backup/
+mutants/results.json
+mutants/killers.json
+mutants/survivors.md
+
+# 人間がレビューする成果物はコミットする: bug_suspects.md, */analysis.md, mutants/mutants.json

@@ -1,0 +1,17 @@
+{
+  // Copilot のカスタム指示 (.github/copilot-instructions.md, .github/instructions/*.instructions.md) を読み込む
+  "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+  // プロンプトファイル (.github/prompts/*.prompt.md) を有効化
+  "chat.promptFiles": true,
+  // エージェント定義 (.agent.md) 内の hooks を有効化（Preview）。test-writer のガード/終了チェックに必要
+  "chat.useCustomAgentHooks": true,
+  // ワークフロー自体のファイルは自動承認しない（エージェントによる改変防止）
+  "chat.tools.edits.autoApprove": {
+    "**/.github/**": false,
+    "**/.vscode/**": false
+  },
+  // 検証スクリプトの実行は毎回の承認を省略する（スクリプトはフックで編集禁止になっている）
+  "chat.tools.terminal.autoApprove": {
+    "/^powershell -NoProfile -ExecutionPolicy Bypass -File \\.github[\\\\/]skills[\\\\/]cpp-(test-gate|mutation)[\\\\/]scripts[\\\\/][a-z_]+\\.ps1( |$)/": true
+  }
+}

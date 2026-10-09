@@ -1,0 +1,53 @@
+{
+  "_readme": "Settings for the Copilot test-generation workflow. Paths are relative to the repository root. See TESTGEN_README.md.",
+
+  "build": {
+    "_help": "MSBuild is used when 'command' is empty. Building the .sln with /t:<TestProject> keeps the normal Visual Studio output folders ($(SolutionDir)x64\\Debug).",
+    "msbuild": "auto",
+    "project": ["YourSolution.sln"],
+    "configuration": "Debug",
+    "platform": "x64",
+    "extraArgs": ["/t:UnitTests", "/m", "/nologo", "/v:minimal"],
+    "command": "",
+    "timeoutSec": 1800
+  },
+
+  "tests": {
+    "_help": "Google Test executables produced by the build. Several executables are allowed.",
+    "executables": ["x64/Debug/UnitTests.exe"],
+    "workingDirectory": "",
+    "repeat": 5,
+    "timeoutSec": 600,
+    "extraArgs": []
+  },
+
+  "coverage": {
+    "_help": "OpenCppCoverage needs a Debug build with PDB files. 'sources' limits measurement to your production code. tool='custom' lets you plug in another tool via customCommand (placeholders: {exe} {args} {output} {root}); it must write Cobertura XML to {output}.",
+    "tool": "OpenCppCoverage",
+    "openCppCoverageExe": "auto",
+    "sources": ["src"],
+    "excludedSources": ["tests", "third_party", "packages", "external"],
+    "modules": [],
+    "optimizedBuild": false,
+    "customCommand": "",
+    "timeoutSec": 1800
+  },
+
+  "paths": {
+    "_help": "production = code under test (tests may not modify it). tests = where test code lives. testProjectFiles = project files the agent may edit to register new test .cpp files.",
+    "production": ["src", "include"],
+    "tests": ["tests"],
+    "testProjectFiles": ["tests/UnitTests/UnitTests.vcxproj", "tests/UnitTests/UnitTests.vcxproj.filters"],
+    "reports": "test-reports"
+  },
+
+  "gate": {
+    "requireCoverageGainPerTest": true,
+    "maxPerTestCoverageRuns": 40
+  },
+
+  "mutation": {
+    "maxMutantsPerRun": 20,
+    "testTimeoutSec": 300
+  }
+}
