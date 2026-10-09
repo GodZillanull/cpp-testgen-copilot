@@ -5,6 +5,11 @@ param([string[]]$Target = @(), [switch]$NoBuild, [int]$MaxLinesPerFile = 150)
 . "$PSScriptRoot/common.ps1"
 
 $cfg = Get-TgConfig
+if ((Get-TgCoverageMode $cfg) -eq 'none') {
+    Write-Host 'COVERAGE DISABLED: no coverage tool (coverage.tool is none, or auto without OpenCppCoverage).'
+    Write-Host 'Mutation-only mode: find weak spots with the cpp-mutation skill (mutate.ps1 -> survivors.md) instead of uncovered.md.'
+    exit 4
+}
 $reports = Get-TgReportsDir $cfg
 $work = Join-Path $reports 'coverage/work'
 if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }

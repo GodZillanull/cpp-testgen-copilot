@@ -18,8 +18,11 @@
 #   BUILD_ERROR : the mutant does not compile              -> invalid mutant, ignored
 #   INVALID     : snippet not found / not unique / not in production paths
 #
-# Outputs: <reports>/mutants/results.json, survivors.md, killers.json (test -> killed mutant ids; read by gate.ps1)
+# Outputs: <reports>/mutants/results.json (read by gate.ps1), survivors.md, killers.json (test -> killed mutant ids)
+# gate.ps1 credits a new test for a mutant only if no baseline test kills it and the result was produced
+# with the current test sources (re-run this script after changing tests).
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File .github/skills/cpp-mutation/scripts/mutate.ps1 [-Ids M1,M2] [-OnlySurvivors]
+#   -OnlySurvivors : re-run surviving mutants, new mutants, and kills recorded before the latest test change
 param([string[]]$Ids = @(), [switch]$OnlySurvivors, [string]$MutantsFile = '')
 . "$PSScriptRoot/../../cpp-test-gate/scripts/common.ps1"
 
@@ -53,14 +56,20 @@ $idFilter = @()
 foreach ($i in $Ids) { foreach ($x in ($i -split ',')) { if ($x.Trim()) { $idFilter += $x.Trim() } } }
 
 $prev = Read-TgJson (Join-Path $mdir 'results.json')
-$prevStatus = @{}
-if ($prev) { foreach ($r in (ConvertTo-TgArray $prev.results)) { $prevStatus[[string]$r.id] = [string]$r.status } }
+$prevStatus = @{}; $prevHash = @{}
+if ($prev) { foreach ($r in (ConvertTo-TgArray $prev.results)) { $prevStatus[[string]$r.id] = [string]$r.status; $prevHash[[string]$r.id] = [string](Get-TgProp $r 'testsHash' '') } }
+$curTestsHash = Get-TgTestsHash $cfg
 
 $selected = @()
 foreach ($m in $mutants) {
     $id = [string](Get-TgProp $m 'id' '')
     if ($idFilter.Count -gt 0 -and ($idFilter -notcontains $id)) { continue }
-    if ($OnlySurvivors -and $prevStatus.ContainsKey($id) -and $prevStatus[$id] -ne 'SURVIVED') { continue }
+    if ($OnlySurvivors -and $prevStatus.ContainsKey($id)) {
+        # re-run survivors, never-run mutants, and kills recorded with older test code; skip the rest
+        $st = $prevStatus[$id]
+        if ($st -eq 'BUILD_ERROR' -or $st -eq 'INVALID' -or $st -eq 'EQUIVALENT') { continue }
+        if ($st -eq 'KILLED' -and $prevHash[$id] -eq $curTestsHash) { continue }
+    }
     $selected += $m
 }
 if ($selected.Count -gt $maxRun) {
@@ -76,6 +85,7 @@ $t0 = Invoke-TgTests -Cfg $cfg -TimeoutSec $testTimeout
 if (-not $t0.Ok) { Write-Host 'TESTS FAIL on unmutated code. Mutation results would be meaningless.'; exit 2 }
 
 $prodDirs = Get-TgProductionDirs $cfg
+$testsHash = Get-TgTestsHash $cfg   # results are only valid for this version of the tests (gate.ps1 checks it)
 $results = @()
 $n = 0
 foreach ($m in $selected) {
@@ -85,7 +95,7 @@ foreach ($m in $selected) {
     $line = [int](Get-TgProp $m 'line' 0)
     $orig = [string](Get-TgProp $m 'original' '')
     $mut = [string](Get-TgProp $m 'mutated' '')
-    $row = [ordered]@{ id = $id; file = $rel; line = $line; original = $orig; mutated = $mut; fault = [string](Get-TgProp $m 'fault' ''); status = ''; killedBy = @(); detail = '' }
+    $row = [ordered]@{ id = $id; file = $rel; line = $line; original = $orig; mutated = $mut; fault = [string](Get-TgProp $m 'fault' ''); status = ''; killedBy = @(); detail = ''; testsHash = $testsHash }
     Write-Host ("[{0}/{1}] {2} {3}:{4}" -f $n, $selected.Count, $id, $rel, $line)
 
     if (Get-TgProp $m 'equivalent' $false) { $row.status = 'EQUIVALENT'; $row.detail = [string](Get-TgProp $m 'equivalentReason' ''); $results += [pscustomobject]$row; continue }
@@ -152,7 +162,7 @@ $surv = @($all | Where-Object { $_.status -eq 'SURVIVED' })
 $equiv = @($all | Where-Object { $_.status -eq 'EQUIVALENT' }).Count
 $valid = $killed + $surv.Count
 $score = $null; if ($valid -gt 0) { $score = [Math]::Round(100.0 * $killed / $valid, 1) }
-Write-TgJson (Join-Path $mdir 'results.json') ([ordered]@{ updatedAt = (Get-Date).ToString('s'); score = $score; killed = $killed; survived = $surv.Count; equivalent = $equiv; results = $all })
+Write-TgJson (Join-Path $mdir 'results.json') ([ordered]@{ updatedAt = (Get-Date).ToString('s'); testsHash = $testsHash; score = $score; killed = $killed; survived = $surv.Count; equivalent = $equiv; results = $all })
 
 # killers.json: test name -> mutant ids it kills (used by gate.ps1 to accept tests without new coverage)
 $k = [ordered]@{}

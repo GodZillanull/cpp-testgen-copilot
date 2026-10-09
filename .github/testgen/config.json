@@ -22,8 +22,8 @@
   },
 
   "coverage": {
-    "_help": "OpenCppCoverage needs a Debug build with PDB files. 'sources' limits measurement to your production code. tool='custom' lets you plug in another tool via customCommand (placeholders: {exe} {args} {output} {root}); it must write Cobertura XML to {output}.",
-    "tool": "OpenCppCoverage",
+    "_help": "tool: 'auto' = use OpenCppCoverage if installed, otherwise mutation-only mode (no install needed); 'none' = always mutation-only; 'OpenCppCoverage' = require it; 'custom' = customCommand (placeholders {exe} {args} {output} {root}, must write Cobertura XML to {output}). OpenCppCoverage needs a Debug build with PDB files. 'sources' limits measurement to your production code.",
+    "tool": "auto",
     "openCppCoverageExe": "auto",
     "sources": ["src"],
     "excludedSources": ["tests", "third_party", "packages", "external"],

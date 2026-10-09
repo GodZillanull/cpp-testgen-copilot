@@ -395,11 +395,50 @@ function Find-TgOpenCppCoverage {
     return $null
 }
 
+function Get-TgCoverageMode {
+    # Returns 'OpenCppCoverage', 'custom' or 'none'.
+    # coverage.tool = 'auto' (default) uses OpenCppCoverage when it is installed, otherwise 'none'
+    # (mutation-only mode: tests are judged by the bugs they catch instead of the lines they run).
+    param($Cfg)
+    $tool = [string](Get-TgProp (Get-TgProp $Cfg 'coverage') 'tool' 'auto')
+    switch -Regex ($tool) {
+        '^(?i)none$' { return 'none' }
+        '^(?i)custom$' { return 'custom' }
+        '^(?i)opencppcoverage$' { return 'OpenCppCoverage' }
+        default {
+            if (Find-TgOpenCppCoverage $Cfg) { return 'OpenCppCoverage' }
+            return 'none'
+        }
+    }
+}
+
+function Get-TgUniqueKills {
+    # From mutants/results.json: hashtable testName -> array of mutant ids that the test kills
+    # and that NO baseline test kills. Only results produced with the current test sources count.
+    param($Results, [hashtable]$BaselineTests, [string]$CurrentTestsHash)
+    $h = @{}
+    $stale = 0
+    if ($null -eq $Results) { return @{ Kills = $h; Stale = 0 } }
+    foreach ($r in (ConvertTo-TgArray (Get-TgProp $Results 'results'))) {
+        if ([string](Get-TgProp $r 'status' '') -ne 'KILLED') { continue }
+        $by = @(ConvertTo-TgArray (Get-TgProp $r 'killedBy'))
+        if ([string](Get-TgProp $r 'testsHash' '') -ne $CurrentTestsHash) { $stale++; continue }
+        $byBaseline = @($by | Where-Object { $BaselineTests.ContainsKey($_) })
+        if ($byBaseline.Count -gt 0) { continue }
+        foreach ($t in $by) {
+            if (-not $h.ContainsKey($t)) { $h[$t] = @() }
+            $h[$t] = @($h[$t]) + @([string]$r.id)
+        }
+    }
+    return @{ Kills = $h; Stale = $stale }
+}
+
 function Invoke-TgCoverageRun {
     # Runs one executable under coverage, writes Cobertura XML to $OutXml. Returns process result.
     param($Cfg, [string]$Exe, [string]$OutXml, [string]$Filter = '')
     $c = Get-TgProp $Cfg 'coverage'
-    $tool = Get-TgProp $c 'tool' 'OpenCppCoverage'
+    $tool = Get-TgCoverageMode $Cfg
+    if ($tool -eq 'none') { throw 'Coverage is disabled (coverage.tool is none, or auto without OpenCppCoverage installed).' }
     $timeout = [int](Get-TgProp $c 'timeoutSec' 1800)
     if (Test-Path -LiteralPath $OutXml) { Remove-Item -LiteralPath $OutXml -Force }
     $dir = Split-Path -Parent $OutXml

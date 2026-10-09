@@ -42,8 +42,8 @@ test-reports/.gitignore              機械生成物をコミットしない設�
 ### 3.1 前提
 - VS Code + GitHub Copilot 拡張（エージェントモード、Agent Skills、カスタムエージェントが使えるバージョン）
 - Visual Studio 2022（または Build Tools）の MSBuild。IDE は引き続き VS2022 を使って構いません
-- **OpenCppCoverage**（無償）: https://github.com/OpenCppCoverage/OpenCppCoverage/releases からインストール。
-  VS2022 Professional / Community には C++ のカバレッジ計測機能が無いため、これで測ります。プロジェクトの変更は不要で、Debug ビルドの .exe と .pdb があれば動きます（行カバレッジのみ）。
+- **OpenCppCoverage（任意）**: https://github.com/OpenCppCoverage/OpenCppCoverage/releases
+  VS2022 Professional / Community には C++ のカバレッジ計測機能がありません。入れるとカバレッジモード、入れなければ**ミューテーション専用モード**で動きます（下の「2 つのモード」を参照）。プロジェクトの変更は不要で、Debug ビルドの .exe と .pdb があれば動きます（行カバレッジのみ）。
 - 既存の Google Test のテストプロジェクト（.vcxproj、実行ファイルは gtest の main を持つ .exe）
 
 ### 3.2 ファイルの配置
@@ -69,6 +69,22 @@ test-reports/.gitignore              機械生成物をコミットしない設�
 - チャットビューで右クリック → **Diagnostics** を開き、エージェント 2 つ、スキル 3 つ、プロンプト 6 つ、指示ファイルが読み込まれ、エラーが無いことを確認します。
 - フック（Preview 機能）は `chat.useCustomAgentHooks` が必要です。組織ポリシーで無効化されている場合、フックによる制限は効かず、指示による制約のみになります（ゲートによる判定は影響を受けません）。
 
+### 3.4 2 つのモード
+
+`config.json` の `coverage.tool` は既定で `"auto"` です。OpenCppCoverage が見つかればカバレッジモード、見つからなければミューテーション専用モードになります。どちらで動いているかは `/tg-0-setup` の結果と `test-reports/baseline/baseline.md` に表示されます。
+
+| | カバレッジモード | ミューテーション専用モード |
+|---|---|---|
+| 必要なもの | OpenCppCoverage | 追加インストールなし |
+| 新規テストの合格条件 | 単独で新しい行を実行する、または既存テストが見逃すミュータントを検出する | 既存テストが見逃すミュータントを検出する（Meta ACH 方式） |
+| 何を書くかの手がかり | `uncovered.md`（未実行行）と `survivors.md` | `survivors.md`（生き残ったミュータント）のみ |
+| 使うプロンプト | `/tg-2` → `/tg-3` → `/tg-4` | `/tg-2`（ミュータントを先に作る）→ `/tg-4`。`/tg-3` は使えない |
+| 速さ | 速い | 遅め（ミュータントごとにビルドとテスト実行） |
+
+ミューテーション専用モードでは「行を通しただけでアサーションの弱いテスト」が構造的に合格できないため、品質面ではむしろ厳しい基準になります。代わりに、ミュータントで試していない振る舞いはテストされないまま残るので、`/tg-4-mutants` を数ラウンド回して主要な振る舞いを一通り試してください。
+
+モードを切り替えたとき（後から OpenCppCoverage を入れた場合など）は、`test-reports/baseline/` を削除して `/tg-0-setup` をやり直してください（ゲートはモードの変化を検出すると FAIL にします）。
+
 ## 4. 使い方
 
 チャットで `/` を入力するとプロンプトが選べます。エージェントは自動で `test-writer` / `test-reviewer` に切り替わります。
@@ -79,7 +95,7 @@ test-reports/.gitignore              機械生成物をコミットしない設�
 | 1 | `/tg-1-analyze src/Foo.cpp` | 振る舞い一覧・仕様の根拠・阻害要因・シーム提案・テスト計画を `test-reports/Foo/analysis.md` に作成（コード変更なし） |
 | — | 人間 | analysis.md を確認。シームを承認する場合は空ファイル `.github/testgen/seam-approved` を作成（作業後に削除） |
 | 2 | `/tg-2-write src/Foo.cpp` | 計画に沿ってテストを作成し、ゲートを PASS させる |
-| 3 | `/tg-3-coverage src/Foo.cpp` | 未カバー行を狙ってテストを追加（最大 3 ラウンド） |
+| 3 | `/tg-3-coverage src/Foo.cpp` | 未カバー行を狙ってテストを追加（最大 3 ラウンド）。カバレッジモードのみ |
 | 4 | `/tg-4-mutants src/Foo.cpp` | ミューテーションで弱いテストを発見し、捕まえるテストを追加 |
 | 5 | **新しいチャット**で `/tg-5-review tests/FooTest.cpp` | 書いた側の文脈を持たない独立レビュー（KEEP / FIX / DELETE） |
 | — | 人間 | `bug_suspects.md` の判断、差分レビュー、コミット |
@@ -91,7 +107,7 @@ test-reports/.gitignore              機械生成物をコミットしない設�
 | 項目 | 仕組み |
 |---|---|
 | ビルド成功・5 回シャッフル実行で全成功 | `gate.ps1` |
-| 新規テストが単独でカバレッジを増やす、またはミュータントを殺す | `gate.ps1`（テストごとに `--gtest_filter` でカバレッジ計測） |
+| 新規テストが単独でカバレッジを増やす、または既存テストが見逃すミュータントを検出する | `gate.ps1`（テストごとに `--gtest_filter` でカバレッジ計測、`mutants/results.json` と照合。結果は現在のテストコードで得たものだけを数える） |
 | 既存テストの削除・改名の禁止 | `gate.ps1`（`--gtest_list_tests` をベースラインと比較） |
 | 本番コードの変更禁止 | `gate.ps1`（ファイルのハッシュ比較）+ `guard.ps1`（編集ツールを拒否） |
 | `DISABLED_` テストには bug_suspects.md の記録が必要 | `gate.ps1` |
@@ -101,7 +117,8 @@ test-reports/.gitignore              機械生成物をコミットしない設�
 
 ## 6. 制約と注意点
 
-- **行カバレッジのみ**: OpenCppCoverage は分岐カバレッジを出しません。分岐の取りこぼしはミューテーション（手順 4）で補います。
+- **行カバレッジのみ**: カバレッジモードでも OpenCppCoverage は分岐カバレッジを出しません。分岐の取りこぼしはミューテーション（手順 4）で補います。
+- **ミューテーション専用モードの限界**: ゲートが評価できるのは、ミュータントで試した振る舞いだけです。ミュータントの選び方がテストの範囲を決めるので、analysis.md の「ミューテーション候補」と `survivors.md` を人間も確認してください。
 - **ミューテーションは時間がかかる**: ミュータントごとに増分ビルドとテスト実行を行います。ヘッダのミュータントは再ビルド範囲が広くなるので、.cpp を優先してください。
 - **ガードは完全ではありません**: ターミナル経由の書き込みはパターンで検出しているため、抜け道はあり得ます。最終的な防御線はゲートのハッシュ比較と人間の差分レビューです。
 - **フックは Preview 機能**です。VS Code の更新で設定名や挙動が変わる可能性があります。動かない場合は Output パネルの「GitHub Copilot Chat Hooks」を確認してください。

@@ -6,7 +6,8 @@
 #   3. Production code is unchanged since the baseline (unless a human created .github/testgen/seam-approved).
 #   4. All tests pass N times in a row with --gtest_shuffle (flaky / failing tests are rejected).
 #   5. Every new (enabled) test adds line/branch coverage over the baseline on its own,
-#      OR is recorded as killing a mutant in <reports>/mutants/killers.json.
+#      OR catches a mutant that no baseline test catches (mutants/results.json, produced with the current tests).
+#      In mutation-only mode (no coverage tool) only the second criterion applies.
 #   6. Every new DISABLED_ test is referenced in <reports>/bug_suspects.md.
 #
 #  On PASS the baseline is advanced (unless -NoBaselineUpdate), so the next batch must improve on this one.
@@ -45,7 +46,7 @@ function Finish([string]$Verdict) {
     $md = "# Gate report`n`n- Verdict: **$Verdict**`n- Time: $($result.createdAt)`n"
     if ($reasons.Count -gt 0) { $md += "`n## Rejection reasons`n"; foreach ($r in $reasons) { $md += "- $r`n" } }
     if ($result.Contains('newTests')) {
-        $md += "`n## New tests`n`n| Test | Unique new lines | New branches | Mutant killer | Status |`n|---|---:|---:|---|---|`n"
+        $md += "`n## New tests`n`n| Test | Unique new lines | New branches | New mutants caught | Status |`n|---|---:|---:|---|---|`n"
         foreach ($t in $result.newTests) { $md += "| $($t.name) | $($t.newLines) | $($t.newBranches) | $($t.killer) | $($t.status) |`n" }
     }
     if ($result.Contains('coverage')) {
@@ -124,28 +125,46 @@ if (-not $run.Ok) {
     Finish 'FAIL'
 }
 
-# 5. coverage gain -------------------------------------------------------------
-Write-Host '[5/6] Measuring total coverage...'
-$model = Get-TgCoverage -Cfg $cfg -WorkDir (Join-Path $work 'all')
-$nowFiles = ConvertTo-TgObject (ConvertTo-TgCoverageJson $model)
-$nowTotals = Get-TgCoverageTotals $nowFiles
-$baseSet = Get-TgCoveredSet $baseline.coverage
-$nowSet = Get-TgCoveredSet $nowFiles
-$baseBr = Get-TgBranchSet $baseline.coverage
-$gained = 0; foreach ($k in $nowSet) { if (-not $baseSet.Contains($k)) { $gained++ } }
-$lost = @(); foreach ($k in $baseSet) { if (-not $nowSet.Contains($k)) { $lost += $k } }
-$result.coverage = [ordered]@{ baselineLinePct = $baseline.totals.LinePct; currentLinePct = $nowTotals.LinePct; newlyCoveredLines = $gained; lostLines = $lost.Count }
-if ($lost.Count -gt 0) { [void]$notes.Add("Lines covered in baseline but not now (check for nondeterminism): $(($lost | Select-Object -First 15) -join ', ')") }
+# 5. coverage gain / unique mutant kills ------------------------------------------
+$mode = Get-TgCoverageMode $cfg
+$baseMode = [string](Get-TgProp $baseline 'mode' 'OpenCppCoverage')
+$result.mode = $mode
+if ($mode -ne $baseMode) {
+    [void]$reasons.Add("Coverage mode changed (baseline: $baseMode, now: $mode). A human must re-run baseline.ps1.")
+    Finish 'FAIL'
+}
 
-$killers = Read-TgJson (Join-Path $reports 'mutants/killers.json')
+$nowFiles = $baseline.coverage
+$nowTotals = $baseline.totals
+$baseSet = $null; $baseBr = @{}
+if ($mode -ne 'none') {
+    Write-Host '[5/6] Measuring total coverage...'
+    $model = Get-TgCoverage -Cfg $cfg -WorkDir (Join-Path $work 'all')
+    $nowFiles = ConvertTo-TgObject (ConvertTo-TgCoverageJson $model)
+    $nowTotals = Get-TgCoverageTotals $nowFiles
+    $baseSet = Get-TgCoveredSet $baseline.coverage
+    $nowSet = Get-TgCoveredSet $nowFiles
+    $baseBr = Get-TgBranchSet $baseline.coverage
+    $gained = 0; foreach ($k in $nowSet) { if (-not $baseSet.Contains($k)) { $gained++ } }
+    $lost = @(); foreach ($k in $baseSet) { if (-not $nowSet.Contains($k)) { $lost += $k } }
+    $result.coverage = [ordered]@{ baselineLinePct = $baseline.totals.LinePct; currentLinePct = $nowTotals.LinePct; newlyCoveredLines = $gained; lostLines = $lost.Count }
+    if ($lost.Count -gt 0) { [void]$notes.Add("Lines covered in baseline but not now (check for nondeterminism): $(($lost | Select-Object -First 15) -join ', ')") }
+} else {
+    Write-Host '[5/6] Mutation-only mode: coverage is not measured.'
+}
+
+# mutants killed by a new test and by no baseline test, measured against the current test sources
+$curTestsHash = Get-TgTestsHash $cfg
+$mres = Read-TgJson (Join-Path $reports 'mutants/results.json')
+$uk = Get-TgUniqueKills -Results $mres -BaselineTests $baseLookup -CurrentTestsHash $curTestsHash
 $killerLookup = @{}
-if ($killers) { foreach ($p in $killers.PSObject.Properties) { $killerLookup[$p.Name] = (@(ConvertTo-TgArray $p.Value) -join ',') } }
+foreach ($k in $uk.Kills.Keys) { $killerLookup[$k] = (@($uk.Kills[$k]) -join ',') }
+if ($uk.Stale -gt 0) { [void]$notes.Add("$($uk.Stale) killed mutant result(s) were produced with older test code and were ignored. Run mutate.ps1 -OnlySurvivors after the last test change to refresh them.") }
 
-Write-Host "[6/6] Measuring per-test contribution of $($newTests.Count) new test(s)..."
+Write-Host "[6/6] Checking the contribution of $($newTests.Count) new test(s)..."
 $rows = @()
 $idx = 0
 foreach ($t in $newTests) {
-    $idx++
     $row = [ordered]@{ name = $t.Name; newLines = 0; newBranches = 0; killer = ''; status = '' }
     if ($killerLookup.ContainsKey($t.Name)) { $row.killer = $killerLookup[$t.Name] }
     if (Test-Disabled $t.Name) {
@@ -158,6 +177,16 @@ foreach ($t in $newTests) {
         }
         $rows += [pscustomobject]$row; continue
     }
+    if ($mode -eq 'none') {
+        $row.newLines = '-'; $row.newBranches = '-'
+        if ($row.killer) { $row.status = 'ACCEPT (catches a mutant no existing test catches)' }
+        elseif ($requireGain) {
+            $row.status = 'REJECT: catches no new mutant'
+            [void]$reasons.Add("$($t.Name) catches no mutant that the existing tests miss (mutation-only mode). Write mutants for the behaviour it checks and run mutate.ps1 -OnlySurvivors; if it still kills nothing new, delete it.")
+        } else { $row.status = 'ACCEPT (gain not required)' }
+        $rows += [pscustomobject]$row; continue
+    }
+    $idx++
     if ($idx -gt $maxPerTest) {
         $row.status = 'NOT MEASURED (limit gate.maxPerTestCoverageRuns)'
         [void]$notes.Add("Per-test coverage limit reached; $($t.Name) was not measured individually. Submit smaller batches.")
@@ -173,10 +202,10 @@ foreach ($t in $newTests) {
         if ($tb[$k] -gt $bb) { $row.newBranches += ($tb[$k] - $bb) }
     }
     if ($row.newLines -gt 0 -or $row.newBranches -gt 0) { $row.status = 'ACCEPT (coverage gain)' }
-    elseif ($row.killer) { $row.status = 'ACCEPT (kills mutant)' }
+    elseif ($row.killer) { $row.status = 'ACCEPT (catches a mutant no existing test catches)' }
     elseif ($requireGain) {
-        $row.status = 'REJECT: no coverage gain, kills no mutant'
-        [void]$reasons.Add("$($t.Name) adds no coverage over the baseline and kills no recorded mutant. Delete it, or strengthen it to target a surviving mutant (mutate.ps1).")
+        $row.status = 'REJECT: no coverage gain, catches no new mutant'
+        [void]$reasons.Add("$($t.Name) adds no coverage over the baseline and catches no mutant that existing tests miss. Delete it, or strengthen it to target a surviving mutant (mutate.ps1 -OnlySurvivors).")
     } else { $row.status = 'ACCEPT (gain not required)' }
     $rows += [pscustomobject]$row
 }
@@ -188,6 +217,7 @@ if (-not $NoBaselineUpdate) {
     $bl = [ordered]@{
         createdAt        = (Get-Date).ToString('s')
         previous         = $baseline.createdAt
+        mode             = $mode
         tests            = @($list | ForEach-Object { $_.Name })
         coverage         = $nowFiles
         totals           = $nowTotals

@@ -20,15 +20,21 @@ if ($customBuild) {
 }
 
 # Coverage tool
-$tool = Get-TgProp (Get-TgProp $cfg 'coverage') 'tool' 'OpenCppCoverage'
+$requested = [string](Get-TgProp (Get-TgProp $cfg 'coverage') 'tool' 'auto')
+$tool = Get-TgCoverageMode $cfg
 if ($tool -eq 'custom') {
     Write-Host "Coverage        : custom command"
-} else {
+} elseif ($tool -eq 'OpenCppCoverage') {
     $occ = Find-TgOpenCppCoverage $cfg
-    if ($occ) { Write-Host "OpenCppCoverage : $occ" } else { $problems += 'OpenCppCoverage.exe not found. Install from https://github.com/OpenCppCoverage/OpenCppCoverage/releases' }
+    if ($occ) { Write-Host "OpenCppCoverage : $occ" } else { $problems += 'coverage.tool is OpenCppCoverage but OpenCppCoverage.exe was not found. Install it, or set coverage.tool to "auto" or "none".' }
+} else {
+    Write-Host "Coverage        : NONE -> mutation-only mode (new tests must catch a mutant that existing tests miss)"
+    if ($requested -match '^(?i)auto$') { Write-Host '                  (OpenCppCoverage not found; install it later to enable coverage mode, then re-run baseline.ps1)' }
 }
-foreach ($s in (ConvertTo-TgArray (Get-TgProp (Get-TgProp $cfg 'coverage') 'sources' @()))) {
-    if (-not (Test-Path -LiteralPath (Resolve-TgPath $s))) { $problems += "coverage.sources path not found: $s" }
+if ($tool -ne 'none') {
+    foreach ($s in (ConvertTo-TgArray (Get-TgProp (Get-TgProp $cfg 'coverage') 'sources' @()))) {
+        if (-not (Test-Path -LiteralPath (Resolve-TgPath $s))) { $problems += "coverage.sources path not found: $s" }
+    }
 }
 
 # Paths
@@ -40,7 +46,7 @@ foreach ($e in (Get-TgTestExecutables $cfg)) {
     if (Test-Path -LiteralPath $e) {
         Write-Host "Test exe        : $(Get-TgRelPath $e)"
         $pdb = [System.IO.Path]::ChangeExtension($e, '.pdb')
-        if ($script:TgIsWindows -and $tool -ne 'custom' -and -not (Test-Path -LiteralPath $pdb)) {
+        if ($script:TgIsWindows -and $tool -eq 'OpenCppCoverage' -and -not (Test-Path -LiteralPath $pdb)) {
             Write-Host "  WARNING: $([System.IO.Path]::GetFileName($pdb)) not found next to the exe. OpenCppCoverage needs PDBs (Linker > Debugging > Generate Debug Info)."
         }
     } else {

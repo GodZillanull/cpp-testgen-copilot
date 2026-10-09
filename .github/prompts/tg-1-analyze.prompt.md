@@ -10,7 +10,7 @@ argument-hint: 対象ファイル（例 src/RateLimiter.cpp）
 
 調べること:
 - 対象と、そのヘッダ・呼び出し元（検索で使われ方を確認）・既存テスト・関連ドキュメント
-- `test-reports/coverage/uncovered.md` が古ければ `coverage.ps1 -Target ${input:target}` を実行して最新にする
+- カバレッジモードなら、`test-reports/coverage/uncovered.md` が古ければ `coverage.ps1 -Target ${input:target}` を実行して最新にする（ミューテーション専用モードでは終了コード 4 になるので不要）
 
 analysis.md の構成:
 1. **公開された振る舞いの一覧**: 振る舞いごとに「入力/状態 → 期待される結果」と**仕様の根拠**（ヘッダのコメント、ドキュメント、名前、呼び出し元の使い方）。根拠が無いものは「根拠なし → 特性テスト」と明記。

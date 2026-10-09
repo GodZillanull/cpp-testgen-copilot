@@ -1,6 +1,6 @@
 ---
 name: cpp-mutation
-description: Mutation testing for MSVC C++ code without Mull - the agent proposes realistic single-line faults (mutants) in production code, a script applies each one, rebuilds, runs Google Test and restores the file. Use after tests pass the gate, to find weak assertions and write tests that catch surviving faults (Meta ACH / Google mutation testing style).
+description: Mutation testing for MSVC C++ code without Mull or any install - the agent proposes realistic single-line faults (mutants) in production code, a script applies each one, rebuilds, runs Google Test and restores the file. Use to find weak assertions and write tests that catch surviving faults (Meta ACH style), and as the main guide for what to test when no coverage tool is installed (mutation-only mode).
 ---
 
 # LLM 提案型ミューテーションテスト（Meta ACH 方式）
@@ -8,6 +8,9 @@ description: Mutation testing for MSVC C++ code without Mull - the agent propose
 カバレッジは「実行したか」しか測れない。ミューテーションは「バグを入れたらテストが気づくか」を測る。
 Windows/MSVC では Mull が使えないため、**ミュータント（擬似バグ）はあなたが提案し、適用・ビルド・実行・復元はスクリプトが行う**。
 スクリプトは各ミュータントの後で元ファイルをバイト単位で必ず復元する（中断時も次回起動時に自動復元）。
+
+カバレッジツールが無い環境（ミューテーション専用モード）では、これが**テストの価値を測る唯一の基準**になる。
+ゲートは新規テストを「ベースラインのどのテストも検出しないミュータントを検出した」場合にだけ合格させるので、**テストを書く前に**ミュータントを作って実行し、生き残りを確認しておく。
 
 ## 手順
 
@@ -17,8 +20,13 @@ Windows/MSVC では Mull が使えないため、**ミュータント（擬似�
 4. 生き残り（SURVIVED）ごとに、どちらかを行う:
    - **殺すテストを書く**: 元のコードで成功し、ミュータントで失敗するテスト。期待値は仕様から決める（ミュータントとの差分から逆算しない）。
    - **等価ミュータントとして除外**: どの入力でも挙動が変わらない場合のみ。`mutants.json` の該当要素に `"equivalent": true, "equivalentReason": "理由"` を追加。「テストが書きにくい」は等価の理由にならない。
-5. 追加したテストで殺せたか確認: `mutate.ps1 -OnlySurvivors`（または `-Ids M3,M7`）
-6. 最後に cpp-test-gate の `gate.ps1` を実行する。ミュータントを殺したテストはカバレッジが増えなくても合格になる（`killers.json` で照合）。
+5. 追加したテストで殺せたか確認: `mutate.ps1 -OnlySurvivors`（生き残り・未実行・テスト変更前の検出結果だけを再実行する）
+6. 最後に cpp-test-gate の `gate.ps1` を実行する。新しくミュータントを検出したテストは、カバレッジが増えなくても合格になる。
+
+ゲートが新規テストの手柄として数えるのは、次のすべてを満たすミュータントだけ:
+- そのテストが失敗して検出した（`results.json` の `killedBy` に含まれる）
+- ベースラインのテストはどれも検出していない
+- 結果が**現在のテストコード**で得られたもの（テストを追加・修正・削除したら `mutate.ps1 -OnlySurvivors` を実行し直す）
 
 スクリプト: [mutate.ps1](./scripts/mutate.ps1)。`results.json`, `killers.json`, `survivors.md` はスクリプト専用（編集禁止）。
 

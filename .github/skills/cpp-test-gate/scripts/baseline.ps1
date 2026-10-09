@@ -32,14 +32,22 @@ if (-not $run.Ok) {
     exit 3
 }
 
-Write-Host '[4/4] Measuring coverage...'
-$model = Get-TgCoverage -Cfg $cfg -WorkDir $work
-$files = ConvertTo-TgObject (ConvertTo-TgCoverageJson $model)
-$totals = Get-TgCoverageTotals $files
+$mode = Get-TgCoverageMode $cfg
+if ($mode -eq 'none') {
+    Write-Host '[4/4] Coverage disabled -> mutation-only mode (no coverage measured)'
+    $files = ConvertTo-TgObject ([ordered]@{})
+    $totals = [pscustomobject]@{ LinesCovered = 0; LinesTotal = 0; LinePct = $null; BranchesCovered = 0; BranchesTotal = 0; BranchPct = $null }
+} else {
+    Write-Host '[4/4] Measuring coverage...'
+    $model = Get-TgCoverage -Cfg $cfg -WorkDir $work
+    $files = ConvertTo-TgObject (ConvertTo-TgCoverageJson $model)
+    $totals = Get-TgCoverageTotals $files
+}
 
 $prodHashes = Get-TgFileHashes -Dirs (Get-TgProductionDirs $cfg)
 $baseline = [ordered]@{
     createdAt        = (Get-Date).ToString('s')
+    mode             = $mode
     tests            = @($tests | ForEach-Object { $_.Name })
     coverage         = $files
     totals           = $totals
@@ -49,6 +57,8 @@ $baseline = [ordered]@{
 Write-TgJson (Join-Path $reports 'baseline/baseline.json') $baseline
 Remove-Item -LiteralPath $work -Recurse -Force
 
+$lineTxt = "$($totals.LinePct)% ($($totals.LinesCovered)/$($totals.LinesTotal))"
+if ($mode -eq 'none') { $lineTxt = 'not measured (mutation-only mode)' }
 $branchTxt = 'n/a (tool reports line coverage only)'
 if ($null -ne $totals.BranchPct) { $branchTxt = "$($totals.BranchPct)% ($($totals.BranchesCovered)/$($totals.BranchesTotal))" }
 $md = @"
@@ -56,7 +66,8 @@ $md = @"
 
 - Created: $($baseline.createdAt)
 - Tests: $($tests.Count)
-- Line coverage: $($totals.LinePct)% ($($totals.LinesCovered)/$($totals.LinesTotal))
+- Mode: $mode
+- Line coverage: $lineTxt
 - Branch coverage: $branchTxt
 - Production files hashed: $($prodHashes.Count)
 
@@ -72,5 +83,5 @@ foreach ($p in $files.PSObject.Properties) {
 }
 Write-TgText (Join-Path $reports 'baseline/baseline.md') $md
 Write-Host ''
-Write-Host "BASELINE SAVED: tests=$($tests.Count) line=$($totals.LinePct)% -> $(Get-TgRelPath (Join-Path $reports 'baseline/baseline.json'))"
+Write-Host "BASELINE SAVED: mode=$mode tests=$($tests.Count) line=$lineTxt -> $(Get-TgRelPath (Join-Path $reports 'baseline/baseline.json'))"
 exit 0

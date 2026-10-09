@@ -19,7 +19,7 @@ VS Code の GitHub Copilot で、既存の C++ コード（Visual Studio 2022 / 
 ## 導入
 
 1. このリポジトリの `.github/`, `.vscode/`, `test-reports/`, `TESTGEN_README.md` を、テストを追加したい C++ リポジトリのルートにコピーします。
-2. [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage/releases) をインストールします。
+2. （任意）[OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage/releases) をインストールします。入れなければ、追加インストール不要の**ミューテーション専用モード**で動きます（新規テストは「既存テストが見逃す擬似バグを検出した」場合だけ採用）。
 3. `.github/testgen/config.json` を自分のソリューションに合わせます。
 4. VS Code の Copilot Chat で `/tg-0-setup` を実行します。
 

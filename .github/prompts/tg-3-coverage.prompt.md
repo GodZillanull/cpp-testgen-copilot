@@ -6,7 +6,9 @@ argument-hint: 対象ファイル（例 src/RateLimiter.cpp）
 ---
 対象: ${input:target:src/Foo.cpp}
 
-カバレッジの穴を埋めるテストを追加してください（CoverUp 方式: 未カバー箇所を明示して反復）。最大 ${input:rounds:3} ラウンド。
+まず `test-reports/baseline/baseline.md` のモードを確認してください。**ミューテーション専用モードの場合はこのプロンプトは使えません**。その旨と、代わりに `/tg-4-mutants` を使うことをユーザーに伝えて終了してください。
+
+カバレッジモードの場合: カバレッジの穴を埋めるテストを追加してください（CoverUp 方式: 未カバー箇所を明示して反復）。最大 ${input:rounds:3} ラウンド。
 
 各ラウンド:
 1. `coverage.ps1 -Target ${input:target}` を実行し、`test-reports/coverage/uncovered.md` を読む。
